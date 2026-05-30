@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>实验室资源占用情况</title>
+<style>
+/* 基础样式：保证布局不偏移 */
+*{margin:0;padding:0;box-sizing:border-box;font-family:微软雅黑;}
+body{padding:20px;background:#f5f5f5;}
+.container{max-width:1200px;margin:0 auto;background:white;padding:20px;border-radius:8px;}
+h2{text-align:center;margin-bottom:15px;}
+.btn-box{margin:15px 0;display:flex;gap:10px;flex-wrap:wrap;}
+button{padding:8px 14px;border:none;border-radius:4px;color:white;cursor:pointer;}
+button.save{background:#27ae60;}
+button.add-row{background:#409eff;}
+button.add-page{background:#9b59b6;}
+button.del{background:#f56c6c;}
+button.export{background:#67c23a;}
+input[type="number"]{padding:8px;width:80px;border:1px solid #ddd;border-radius:4px;}
+
+/* 新增：日期行样式 */
+.date-row{
+  margin:15px 0;
+  display:flex;
+  align-items:center;
+  gap:10px;
+  font-size:14px;
+}
+.date-row .required{
+  position:relative;
+}
+.date-row .required::after{
+  content:'*';
+  color:red;
+  position:absolute;
+  right:-12px;
+  top:50%;
+  transform:translateY(-50%);
+}
+.date-input{
+  padding:8px 12px;
+  border:1px solid #ddd;
+  border-radius:4px;
+  min-width:220px;
+  outline:none;
+  cursor:text;
+}
+
+/* 表格核心：严格对齐，无偏移 */
+table{
+  width:100%;
+  border-collapse:collapse;border:1px solid #eee;margin:0;padding:0;
+}
+th,td{border:1px solid #eee;padding:12px;min-height:40px;min-width:100px;}
+th{background:#f8f9fa;position:relative;}
+th.required::after{content:'*';color:red;position:absolute;right:8px;top:50%;transform:translateY(-50%);}
+td[contenteditable="true"]{outline:none;}
+
+.pagination{margin:15px 0;text-align:center;padding-top:10px;}
+.pagination button{background:#409eff;margin:0 5px;}
+.pagination button:disabled{background:#ccc;cursor:not-allowed;}
+</style>
+</head>
+<body>
+<div class="container">
+  <h2>实验室资源占用情况</h2>
+
+  <!-- 功能按钮 -->
+  <div class="btn-box">
+    <button class="save" onclick="saveNow()">保存</button>
+    <button class="add-row" onclick="addOneRow()">本页加一行</button>
+    <input type="number" id="batchNum" placeholder="行数" min="1">
+    <button class="add-row" onclick="batchAddRow()">批量加行</button>
+    <button class="add-page" onclick="addNewPage()">新增一页</button>
+    <button class="del" onclick="delChecked()">批量删除</button>
+    <button class="export" onclick="exportExcel()">导出Excel</button>
+  </div>
+
+  <!-- 修改：行内日期输入（替换原右侧列） -->
+  <div class="date-row">
+    <span class="required">日期</span>：
+    <div class="date-input" contenteditable="true" id="dateInput"></div>
+  </div>
+
+  <!-- 主体表格 -->
+  <table>
+    <thead>
+      <tr>
+        <th width="60"><input type="checkbox" id="checkAll"></th>
+        <th class="required">资源*</th>
+        <th class="required">socket*</th>
+        <th class="required">芯片型号*</th>
+        <th>实验内容</th>
+        <th>预计需要时间</th>
+        <th class="required">使用人*</th>
+      </tr>
+    </thead>
+    <tbody id="tableBody">
+      <!-- 初始3行 -->
+      <tr>
+        <td><input type="checkbox" class="row-check"></td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true">我</td>
+      </tr>
+      <tr>
+        <td><input type="checkbox" class="row-check"></td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true"></td>
+      </tr>
+      <tr>
+        <td><input type="checkbox" class="row-check"></td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true"></td>
+        <td contenteditable="true"></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- 分页 -->
+  <div class="pagination">
+    <button id="prevBtn" disabled>上一页</button>
+    <span id="pageInfo">1/1</span>
+    <button id="nextBtn" disabled>下一页</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+<script>
+let currentPage = 1;
+let pages = [{
+  rows: Array.from(document.querySelectorAll('#tableBody tr')).map(tr => {
+    const tds = tr.querySelectorAll('td');
+    return {
+      resource: tds[1].innerText,
+      socket: tds[2].innerText,
+      chip: tds[3].innerText,
+      content: tds[4].innerText,
+      time: tds[5].innerText,
+      user: tds[6].innerText
+    };
+  }),
+  date: '' // 日期列数据
+}];
+
+// 加一行（自动匹配日期列高度，保证底部对齐）
+function addOneRow() {
+  const tbody = document.getElementById('tableBody');
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="checkbox" class="row-check"></td>
+    <td contenteditable="true"></td>
+    <td contenteditable="true"></td>
+    <td contenteditable="true"></td>
+    <td contenteditable="true"></td>
+    <td contenteditable="true"></td>
+    <td contenteditable="true"></td>
+  `;
+  tbody.appendChild(tr);
+  pages[currentPage-1].rows.push({
+    resource: '', socket: '', chip: '', content: '', time: '', user: ''
+  });
+}
+
+// 批量加行
+function batchAddRow() {
+  const num = parseInt(document.getElementById('batchNum').value) || 1;
+  for(let i=0; i<num; i++) addOneRow();
+}
+
+// 新增一页
+function addNewPage() {
+  saveCurrentPageData();
+  // 清空表格
+  document.getElementById('tableBody').innerHTML = '';
+  // 清空日期输入区
+  document.getElementById('dateInput').innerText = '';
+  // 新增3行
+  for(let i=0; i<3; i++) addOneRow();
+  // 更新分页
+  currentPage++;
+  pages.push({
+    rows: Array.from(document.querySelectorAll('#tableBody tr')).map(tr => {
+      const tds = tr.querySelectorAll('td');
+      return {
+        resource: tds[1].innerText,
+        socket: tds[2].innerText,
+        chip: tds[3].innerText,
+        content: tds[4].innerText,
+        time: tds[5].innerText,
+        user: tds[6].innerText
+      };
+    }),
+    date: ''
+  });
+  document.getElementById('pageInfo').innerText = `${currentPage}/${pages.length}`;
+  document.getElementById('prevBtn').disabled = false;
+}
+
+// 保存当前页数据（含日期）
+function saveCurrentPageData() {
+  // 保存表格行
+  const rows = document.querySelectorAll('#tableBody tr');
+  pages[currentPage-1].rows = Array.from(rows).map(tr => {
+    const tds = tr.querySelectorAll('td');
+    return {
+      resource: tds[1].innerText,
+      socket: tds[2].innerText,
+      chip: tds[3].innerText,
+      content: tds[4].innerText,
+      time: tds[5].innerText,
+      user: tds[6].innerText
+    };
+  });
+  // 保存日期
+  pages[currentPage-1].date = document.getElementById('dateInput').innerText.trim();
+}
+
+// 保存所有数据
+function saveNow() {
+  saveCurrentPageData();
+  localStorage.setItem('labData', JSON.stringify(pages));
+  alert('保存成功！日期已同步保存');
+}
+
+// 删除勾选行
+function delChecked() {
+  const checkedRows = document.querySelectorAll('.row-check:checked');
+  if(checkedRows.length === 0) {
+    alert('请先勾选要删除的行！');
+    return;
+  }
+  checkedRows.forEach(row => row.closest('tr').remove());
+  saveCurrentPageData();
+}
+
+// 导出Excel
+function exportExcel() {
+  saveCurrentPageData();
+  const wsData = [['资源', 'socket', '芯片型号', '实验内容', '预计需要时间', '使用人', '日期']];
+  pages.forEach((page, idx) => {
+    wsData.push([`=== 第${idx+1}页 ===`, '', '', '', '', '', '']);
+    page.rows.forEach(row => {
+      wsData.push([row.resource, row.socket, row.chip, row.content, row.time, row.user, page.date]);
+    });
+  });
+  const ws = XLSX.utils.aoa_to_sheet(wsData);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '资源占用表');
+  XLSX.writeFile(wb, '实验室资源占用表.xlsx');
+}
+
+// 分页逻辑
+document.getElementById('prevBtn').onclick = function() {
+  if(currentPage > 1) {
+    saveCurrentPageData();
+    currentPage--;
+    renderPage(currentPage);
+    document.getElementById('pageInfo').innerText = `${currentPage}/${pages.length}`;
+    if(currentPage === 1) this.disabled = true;
+    document.getElementById('nextBtn').disabled = false;
+  }
+};
+
+document.getElementById('nextBtn').onclick = function() {
+  if(currentPage < pages.length) {
+    saveCurrentPageData();
+    currentPage++;
+    renderPage(currentPage);
+    document.getElementById('pageInfo').innerText = `${currentPage}/${pages.length}`;
+    if(currentPage === pages.length) this.disabled = true;
+    document.getElementById('prevBtn').disabled = false;
+  }
+};
+
+// 渲染页面（含日期）
+function renderPage(pageNum) {
+  const tbody = document.getElementById('tableBody');
+  tbody.innerHTML = '';
+  // 渲染表格行
+  pages[pageNum-1].rows.forEach(row => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input type="checkbox" class="row-check"></td>
+      <td contenteditable="true">${row.resource}</td>
+      <td contenteditable="true">${row.socket}</td>
+      <td contenteditable="true">${row.chip}</td>
+      <td contenteditable="true">${row.content}</td>
+      <td contenteditable="true">${row.time}</td>
+      <td contenteditable="true">${row.user}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+  // 渲染日期
+  document.getElementById('dateInput').innerText = pages[pageNum-1].date || '';
+}
+
+// 全选
+document.getElementById('checkAll').onclick = function() {
+  const allChecks = document.querySelectorAll('.row-check');
+  allChecks.forEach(check => check.checked = this.checked);
+};
+
+// ========== 新增：Ctrl+S 保存快捷键 ==========
+document.addEventListener('keydown', function(e) {
+  // 判断按下 Ctrl+S
+  if (e.ctrlKey && e.key === 's') {
+    e.preventDefault(); // 阻止浏览器默认保存页面
+    saveNow(); // 调用保存函数
+  }
+});
+
+// 初始化
+window.onload = function() {
+  const savedData = localStorage.getItem('labData');
+  if(savedData) {
+    pages = JSON.parse(savedData);
+    currentPage = 1;
+    renderPage(1);
+    document.getElementById('pageInfo').innerText = `${currentPage}/${pages.length}`;
+    if(pages.length > 1) document.getElementById('nextBtn').disabled = false;
+  }
+};
+</script>
+</body>
+</html>
