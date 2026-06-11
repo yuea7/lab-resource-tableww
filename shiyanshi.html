@@ -19,7 +19,7 @@ button.del{background:#f56c6c;}
 button.export{background:#67c23a;}
 input[type="number"]{padding:8px;width:80px;border:1px solid #ddd;border-radius:4px;}
 
-/* 新增：日期行样式 */
+/* 日期行样式 */
 .date-row{
   margin:15px 0;
   display:flex;
@@ -138,6 +138,11 @@ td[contenteditable="true"]{outline:none;}
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 <script>
+// ===================== JSONBin 配置 =====================
+const BIN_ID = "6a2abe4eda38895dfeadcace";
+const API_KEY = "$2a$10$FeTNklizuYJQSY4H5u0s8elkiAataMaTljYG12PGlpSUK5MpwHdGK";
+// =================================================================================
+
 let currentPage = 1;
 let pages = [{
   rows: Array.from(document.querySelectorAll('#tableBody tr')).map(tr => {
@@ -208,7 +213,7 @@ function addNewPage() {
   document.getElementById('prevBtn').disabled = false;
 }
 
-// 保存当前页数据（含日期）
+// 保存当前页数据
 function saveCurrentPageData() {
   // 保存表格行
   const rows = document.querySelectorAll('#tableBody tr');
@@ -227,12 +232,31 @@ function saveCurrentPageData() {
   pages[currentPage-1].date = document.getElementById('dateInput').innerText.trim();
 }
 
-// 保存所有数据
-function saveNow() {
+// ===================== 修改：保存函数（已修复请求头，原有逻辑不变） =====================
+async function saveNow() {
   saveCurrentPageData();
-  localStorage.setItem('labData', JSON.stringify(pages));
-  alert('保存成功！日期已同步保存');
+  try {
+    const response = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        // 修复：主密钥必须用X-Master-Key请求头
+        "X-Master-Key": API_KEY
+      },
+      body: JSON.stringify(pages)
+    });
+    const resData = await response.json();
+    if (response.ok) {
+      alert('保存成功！');
+    } else {
+      alert('保存失败：' + (resData.message || '请检查BinID和密钥'));
+    }
+  } catch (error) {
+    alert('网络异常，保存失败');
+    console.error(error);
+  }
 }
+// ==========================================================================================
 
 // 删除勾选行
 function delChecked() {
@@ -279,6 +303,7 @@ document.getElementById('nextBtn').onclick = function() {
     currentPage++;
     renderPage(currentPage);
     document.getElementById('pageInfo').innerText = `${currentPage}/${pages.length}`;
+    document.getElementById('pageInfo').innerText = `${currentPage}/${pages.length}`;
     if(currentPage === pages.length) this.disabled = true;
     document.getElementById('prevBtn').disabled = false;
   }
@@ -312,7 +337,7 @@ document.getElementById('checkAll').onclick = function() {
   allChecks.forEach(check => check.checked = this.checked);
 };
 
-// ========== 新增：Ctrl+S 保存快捷键 ==========
+// ========== Ctrl+S 保存快捷键 ==========
 document.addEventListener('keydown', function(e) {
   // 判断按下 Ctrl+S
   if (e.ctrlKey && e.key === 's') {
@@ -321,17 +346,29 @@ document.addEventListener('keydown', function(e) {
   }
 });
 
-// 初始化
-window.onload = function() {
-  const savedData = localStorage.getItem('labData');
-  if(savedData) {
-    pages = JSON.parse(savedData);
-    currentPage = 1;
-    renderPage(1);
-    document.getElementById('pageInfo').innerText = `${currentPage}/${pages.length}`;
-    if(pages.length > 1) document.getElementById('nextBtn').disabled = false;
+// ===================== 修改：页面初始化（已修复请求头，原有逻辑不变） =====================
+window.onload = async function() {
+  try {
+    const response = await fetch(`https://api.jsonbin.io/v3/b/${BIN_ID}/latest`, {
+      headers: {
+        // 修复：主密钥必须用X-Master-Key请求头
+        "X-Master-Key": API_KEY
+      }
+    });
+    const resData = await response.json();
+    // 如果云端有数据，覆盖本地数据
+    if (response.ok && resData.record) {
+      pages = resData.record;
+      currentPage = 1;
+      renderPage(1);
+      document.getElementById('pageInfo').innerText = `${currentPage}/${pages.length}`;
+      if(pages.length > 1) document.getElementById('nextBtn').disabled = false;
+    }
+  } catch (error) {
+    console.log('暂无云端数据，使用本地初始内容');
   }
 };
+// ==================================================================================================
 </script>
 </body>
 </html>
